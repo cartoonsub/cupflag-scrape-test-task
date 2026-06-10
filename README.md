@@ -1,29 +1,59 @@
 # cupflag
 
+## Требования
+
+- Python 3.11+
+- Установленные зависимости из requirements.txt
+- Прокси при запуске из региона, где недоступен Cloudflare
+
 ## Локальный запуск
 
-1. Создать виртуальное окружение и установить зависимости:
-   python -m venv venv
-   venv\Scripts\activate
-   pip install -r requirements.txt
+```bash
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
 
-2. При запуске скриптов из стран, где не работает cloudflare, необходимо использовать прокси.
-Заполнить файл proxy.ini
-
-3. Запустить скрипты:
+Запустить нужный скрипт:
 python chalenge_V1.py
 python chalenge_V2.py
 python chalenge_V3.py
+```
+
+## Прокси
+
+Использовать файл `proxy.ini`, пример в `proxy.ini.example`
+
+## Логи
+Логи пишутся в папку `./logs/`
 
 ## Запуск в Docker
+
+```bash
 docker compose build
 docker compose up -d
+```
 
-Контейнер будет запущен в фоновом режиме, чтобы можно запустить несколько скриптов внутри одного контейнера. Решение только для демонстрации.
+Контейнер запускается в фоне и ожидает команды для запуска нужного скрипта.
+Запустить нужный скрипт внутри:
 
-Запустить нужный скрипт внутри контейнера:
+```bash
 docker compose exec main python chalenge_V1.py
 docker compose exec main python chalenge_V2.py
 docker compose exec main python chalenge_V3.py
+```
+Логи доступны на хосте в папке `./logs/`.
 
-Логи скриптов пишутся в папку ./logs/ на хосте
+## Структура проекта
+
+```
+.
+├── chalenge_V1.py 
+├── chalenge_V2.py       
+├── chalenge_V3.py  
+├── credentials.py   
+├── requirements.txt
+├── proxy.ini.example
+├── Dockerfile
+├── docker-compose.yml
+└── WRITEUP.md
+```
