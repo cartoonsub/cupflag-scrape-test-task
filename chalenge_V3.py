@@ -1,28 +1,19 @@
-from pathlib import Path
+import asyncio
 import configparser
 import sys
-import hashlib
+from pathlib import Path
 
-import asyncio
-from camoufox.async_api import AsyncCamoufox
 from browserforge.fingerprints import Screen
-
-from faker import Faker
+from camoufox.async_api import AsyncCamoufox
 from loguru import logger
+
+from credentials import generate_credentials
+
 
 logger.remove()
 logger.add(
     sys.stdout, format="[{time:HH:mm:ss.SSS}] {message}", colorize=False)
 logger.add("./logs/V3.log", format="[{time:HH:mm:ss.SSS}] {message}")
-
-
-fake = Faker()
-
-
-def generate_credentials() -> tuple[str, str]:
-    username = fake.user_name()[3:32]
-    password = hashlib.md5(username.lower().encode()).hexdigest()
-    return username, password
 
 
 class CupflagWorker:
@@ -71,7 +62,7 @@ class CupflagWorker:
             if context.pages:
                 self.page = context.pages[0]
             else:
-                self.page =await context.new_page()
+                self.page = await context.new_page()
 
             await self.page.set_viewport_size({'width': 1280, 'height': 631})
 
@@ -147,15 +138,15 @@ class CupflagWorker:
             try:
                 await self.page.wait_for_selector('#queue-token-input', state="attached", timeout=10000)
                 booking_key = await self.page.locator('#queue-token-input').input_value()
-                print(f"Booking key: {booking_key}")
+                logger.success(f"✓ Booking key captured: {booking_key}")
             except Exception as e:
-                print(f"Error waiting for booking key: {e}")
+                logger.error(f"Error waiting for booking key: {e}")
 
     async def click_checkbox(self):
         try:
             for _ in range(10):
                 await self.page.wait_for_selector('#capture-btn', timeout=10000)
-                is_disabled =await self.page.locator('#capture-btn').is_disabled()
+                is_disabled = await self.page.locator('#capture-btn').is_disabled()
                 if not is_disabled:
                     logger.info(
                         "Capture button is enabled, no need to click checkbox.")
@@ -186,11 +177,10 @@ class CupflagWorker:
         except Exception as e:
             logger.error(f"Error clicking checkbox: {e}")
 
-
     async def clickCaptureButton(self):
         try:
             await self.page.wait_for_selector('#capture-btn', timeout=10000)
-            is_disabled =await self.page.locator('#capture-btn').is_disabled()
+            is_disabled = await self.page.locator('#capture-btn').is_disabled()
             if is_disabled:
                 await self.click_checkbox()
                 await self.page.wait_for_timeout(2000)
@@ -203,7 +193,7 @@ class CupflagWorker:
 
             await self.page.click('#capture-btn')
         except Exception as e:
-            print(f"Error clicking capture button: {e}")
+            logger.error(f"Error clicking capture button: {e}")
 
 
 async def run_lvl3():
