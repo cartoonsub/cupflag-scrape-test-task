@@ -29,7 +29,7 @@ class CupflagWorker:
         profile_path = Path(__file__).parent / 'data' / 'cupflag_profile'
 
         self.camoufox_context = AsyncCamoufox(
-            headless=False,
+            headless=True,
             geoip=True,
             proxy=self.proxy,
             screen=constrains,
@@ -147,7 +147,7 @@ class CupflagWorker:
                 return
 
             await self.click_checkbox()
-            await self.clickCaptureButton()
+            await self.click_captureButton()
             await self.page.wait_for_timeout(5000)
             try:
                 await self.page.wait_for_selector('#queue-token-input', state="attached", timeout=10000)
@@ -189,7 +189,7 @@ class CupflagWorker:
         except Exception as e:
             logger.error(f"Error clicking checkbox: {e}")
 
-    async def clickCaptureButton(self) -> None:
+    async def click_captureButton(self) -> None:
         try:
             await self.page.wait_for_selector('#capture-btn', timeout=10000)
             is_disabled = await self.page.locator('#capture-btn').is_disabled()
