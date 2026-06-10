@@ -2,6 +2,7 @@ import asyncio
 import configparser
 from pathlib import Path
 import sys
+import time
 import uuid
 
 from faker import Faker
@@ -22,6 +23,7 @@ BASE_URL = "https://lvl2.cupflag.top"
 BASE_TOKEN = fake.sha256()
 DEFAULT_RETRY_AFTER_MS = 10000
 MAX_CONCURRENT_WORKERS = 5
+CAPTURED_FLAGS = set()
 
 
 def get_proxy() -> str | None:
@@ -41,7 +43,7 @@ def get_proxy() -> str | None:
         return None
 
 
-async def authorization(client: httpx.AsyncClient) -> bool:
+async def authorization(client: httpx.AsyncClient, worker_id: int) -> bool:
     main_url = "https://lvl2.cupflag.top"
     headers = {
         "Host": "lvl2.cupflag.top",
@@ -64,11 +66,11 @@ async def authorization(client: httpx.AsyncClient) -> bool:
     }
 
     try:
-        logger.info(f"GET {main_url}")
+        logger.info(f"Worker {worker_id}: GET {main_url}")
         await client.get(main_url, headers=headers, follow_redirects=True)
 
         login_url = "https://lvl2.cupflag.top/login"
-        logger.info(f"GET {login_url}")
+        logger.info(f"Worker {worker_id}: GET {login_url}")
         await client.get(login_url, headers=headers, follow_redirects=True)
 
         login, password = generate_credentials()
@@ -97,18 +99,19 @@ async def authorization(client: httpx.AsyncClient) -> bool:
             "Accept-Language": "en",
         }
 
-        logger.info(f"login: user={login} pass=md5(\"{login}\")")
-        logger.info(f"POST {login_url}")
+        logger.info(
+            f"Worker {worker_id}: login: user={login} pass=md5(\"{login}\")")
 
         response = await client.post(login_url, headers=headers, data=post, follow_redirects=True)
-        logger.info(f"status code: {response.status_code}")
+        logger.info(
+            f"Worker {worker_id}: POST {login_url} → {response.status_code}")
         return response.status_code == 200
     except Exception as e:
-        logger.error(f"Error: {e}")
+        logger.error(f"Worker {worker_id}: Error: {e}")
         return False
 
 
-async def catch_cupflags(client: httpx.AsyncClient) -> int:
+async def catch_cupflags(client: httpx.AsyncClient, worker_id: int) -> int:
     request_id = str(uuid.uuid4())
 
     headers = {
@@ -133,53 +136,93 @@ async def catch_cupflags(client: httpx.AsyncClient) -> int:
     body = {"captcha_token": BASE_TOKEN}
     retry_after_ms = DEFAULT_RETRY_AFTER_MS
     try:
-        response = await client.post("https://lvl2.cupflag.top/v1/capture", headers=headers, json=body, follow_redirects=True)
+        response = await client.post(
+            "https://lvl2.cupflag.top/v1/capture",
+            headers=headers,
+            json=body,
+            follow_redirects=True,
+            timeout=15.0
+        )
         data = response.json()
+        logger.info(f"Worker {worker_id}: POST /v1/capture → {data}")
+
         status = data.get("status")
+        if status == "unauthorized":
+            return -1
+
         if status != "ok":
-            logger.info(f"POST /v1/capture → {data}")
             retry_after_ms = data.get("retry_after_ms", DEFAULT_RETRY_AFTER_MS)
             if not isinstance(retry_after_ms, int):
                 retry_after_ms = DEFAULT_RETRY_AFTER_MS
-            logger.warning(
-                f"Capture failed, retrying after {retry_after_ms} ms")
             return retry_after_ms
 
         flag = data.get("flag")
-        logger.info(f"POST /v1/capture → {data}")
-        logger.success(f"✓ Flag captured: {flag}")
+        if flag and flag not in CAPTURED_FLAGS:
+            CAPTURED_FLAGS.add(flag)
+            logger.success(
+                f"Worker {worker_id}: ✓ Flag #{len(CAPTURED_FLAGS)} captured")
+
         return retry_after_ms
     except Exception as e:
-        logger.exception(f"Error capturing flag: {e}")
+        logger.exception(f"Worker {worker_id}: Error during capture: {e}")
         return retry_after_ms
 
 
 async def worker(worker_id: int) -> None:
     await asyncio.sleep(worker_id * (DEFAULT_RETRY_AFTER_MS / MAX_CONCURRENT_WORKERS / 1000))
+
+    logger.info(f"Worker {worker_id} starting")
+    logger.info(f"Worker {worker_id}: Connecting to {BASE_URL}")
+
     async with httpx.AsyncClient(
         verify=False,
         timeout=15.0,
         proxy=get_proxy()
     ) as client:
-        if not await authorization(client):
-            logger.critical("Authorization failed. Stopping.")
-            return
-
         while True:
-            # если авторизация слетит, то нужно попытаться авторизоваться снова
-            delay = await catch_cupflags(client)
-            await asyncio.sleep(delay / 1000)
+            auth_success = False
+            for _ in range(3):
+                if await authorization(client, worker_id):
+                    auth_success = True
+                    break
+                await asyncio.sleep(1)
+
+            if not auth_success:
+                logger.error(
+                    f"Worker {worker_id}: authorization failed after 3 attempts")
+                return
+            
+            while True:
+                delay = await catch_cupflags(client, worker_id)
+                if delay == -1:
+                    break
+                await asyncio.sleep(delay / 1000)
+
+
+async def stats_reporter() -> None:
+    start_time = time.monotonic()
+    while True:
+        await asyncio.sleep(120)
+        uptime_seconds = int(time.monotonic() - start_time)
+        logger.info(f"Total: {len(CAPTURED_FLAGS)} in {uptime_seconds} s")
 
 
 async def run_lvl2() -> None:
     tasks = []
+
+    stats_task = asyncio.create_task(stats_reporter())
+
     for i in range(MAX_CONCURRENT_WORKERS):
         tasks.append(asyncio.create_task(worker(worker_id=i)))
 
-    await asyncio.gather(*tasks)
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        stats_task.cancel()
 
 if __name__ == "__main__":
     try:
         asyncio.run(run_lvl2())
     except KeyboardInterrupt:
-        logger.warning("Скрипт остановлен пользователем")
+        logger.info(f"Total: {len(CAPTURED_FLAGS)} unique flags captured")
+        logger.warning("Script stopped by user")

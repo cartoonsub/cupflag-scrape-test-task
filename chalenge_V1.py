@@ -117,11 +117,11 @@ async def catch_cupflags(client: httpx.AsyncClient, worker_id: int) -> None:
             await asyncio.sleep(0.1)
             response = await client.post(capture_url, headers=headers, json={}, follow_redirects=True)
             data = response.json()
+            logger.info(f"Worker {worker_id}: POST /v1/capture → {data}")
             status = data.get("status")
             if status == "unauthorized":
                 break
 
-            logger.info(f"Worker {worker_id}: POST /v1/capture → {data}")
             if status != "ok":
                 continue
 
