@@ -15,18 +15,21 @@ logger.add(
     sys.stdout, format="[{time:HH:mm:ss.SSS}] {message}", colorize=False)
 logger.add("./logs/V3.log", format="[{time:HH:mm:ss.SSS}] {message}")
 
+BASE_URL = "https://lvl3.cupflag.top"
+CAPTURED_FLAGS = set()
+
 
 class CupflagWorker:
     def __init__(self):
         self.proxy = None
         self.set_proxy()
-        self.base_url = "https://lvl3.cupflag.top"
+        self.base_url = BASE_URL
 
         constrains = Screen(max_width=1280, max_height=631)
         profile_path = Path(__file__).parent / 'data' / 'cupflag_profile'
 
         self.camoufox_context = AsyncCamoufox(
-            headless=True,
+            headless=False,
             geoip=True,
             proxy=self.proxy,
             screen=constrains,
@@ -35,6 +38,7 @@ class CupflagWorker:
         )
         self.page = None
         logger.info("Browser initialized")
+        logger.info(f"Connecting to {self.base_url}")
 
     def set_proxy(self) -> None:
         try:
@@ -59,25 +63,24 @@ class CupflagWorker:
 
     async def run(self):
         async with self.camoufox_context as context:
-            if context.pages:
-                self.page = context.pages[0]
-            else:
-                self.page = await context.new_page()
+            while True:
+                if context.pages:
+                    self.page = context.pages[0]
+                else:
+                    self.page = await context.new_page()
 
-            await self.page.set_viewport_size({'width': 1280, 'height': 631})
+                await self.page.set_viewport_size({'width': 1280, 'height': 631})
 
-            await self.page.goto(self.base_url, wait_until="domcontentloaded")
+                logger.info(f"GET {self.base_url}")
+                await self.page.goto(self.base_url, wait_until="domcontentloaded")
 
-            if not await self.authenticate():
-                logger.error("Authentication failed, stopping worker.")
-                return
+                if not await self.authenticate():
+                    logger.error("Authentication failed. Retrying...")
+                    self.page = None
+                    continue
 
-            logger.info("Authentication successful.")
-
-            await self.catch_booking_key()
-
-            logger.info("Worker finished.")
-            await self.page.wait_for_timeout(1000000)  # todo remove
+                logger.info("Authentication successful.")
+                await self.catch_booking_key()
 
     async def authenticate(self) -> bool:
         if await self.check_authentication():
@@ -86,10 +89,10 @@ class CupflagWorker:
 
         username, password = generate_credentials()
 
-        logger.info("Attempting authentication...")
         await self.page.wait_for_timeout(10000)
         try:
-            url = 'https://lvl3.cupflag.top/login'
+            url = f'{self.base_url}/login'
+            logger.info(f"GET {url}")
             await self.page.goto(url)
             await self.page.wait_for_selector('input[name="login"]', timeout=10000)
 
@@ -102,7 +105,7 @@ class CupflagWorker:
             await self.page.click("button[type='submit']")
 
             await self.page.wait_for_timeout(5000)
-            if not await self.check_authentication():
+            if not await self.check_authentication(check_current_page=True):
                 logger.error("Authentication failed after login attempt.")
                 return False
             return True
@@ -113,47 +116,59 @@ class CupflagWorker:
     async def check_authentication(self, check_current_page=False) -> bool:
         logger.info("Checking authentication status...")
         try:
-            url = "https://lvl3.cupflag.top/"
+            url = f'{self.base_url}/'
             if not check_current_page:
+                logger.info(f"GET {url}")
                 await self.page.goto(url, wait_until="domcontentloaded", timeout=10000)
+
+            content = await self.page.content()
+            if "Unexpected token" in content:
+                logger.error("Bug detected. ReLogin required.")
+                return False
 
             await self.page.wait_for_selector(".container", timeout=30000)
             if await self.page.locator('#capture-btn').count() > 0:
-                logger.info("Found capture button, already authenticated.")
+                logger.info("Founded capture button")
                 return True
 
             if await self.page.locator("input[type='password']").count() > 0:
-                logger.info("Found password field, not authenticated.")
+                logger.info("Founded password field")
                 return False
             return False
         except Exception as e:
             logger.error(f"Not authenticated: {e}")
             return False
 
-    async def catch_booking_key(self):
+    async def catch_booking_key(self) -> None:
+        logger.info("Starting to catch booking key...")
         while True:
+            if not await self.check_authentication(check_current_page=True):
+                logger.warning("Session expired, re-authenticating...")
+                return
+
             await self.click_checkbox()
             await self.clickCaptureButton()
             await self.page.wait_for_timeout(5000)
             try:
                 await self.page.wait_for_selector('#queue-token-input', state="attached", timeout=10000)
                 booking_key = await self.page.locator('#queue-token-input').input_value()
-                logger.success(f"✓ Booking key captured: {booking_key}")
+                if booking_key and booking_key not in CAPTURED_FLAGS:
+                    CAPTURED_FLAGS.add(booking_key)
+                    logger.success(f"✓ Flag #{len(CAPTURED_FLAGS)} captured")
+
             except Exception as e:
                 logger.error(f"Error waiting for booking key: {e}")
 
-    async def click_checkbox(self):
+    async def click_checkbox(self) -> None:
         try:
             for _ in range(10):
                 await self.page.wait_for_selector('#capture-btn', timeout=10000)
                 is_disabled = await self.page.locator('#capture-btn').is_disabled()
                 if not is_disabled:
-                    logger.info(
-                        "Capture button is enabled, no need to click checkbox.")
+                    logger.info("Capture button is enabled")
                     return
 
-                logger.info(
-                    "Capture button is disabled, attempting to click checkbox.")
+                logger.info("Trying to click checkbox")
 
                 container_selector = '#turnstile-container'
                 container = self.page.locator(container_selector)
@@ -163,21 +178,18 @@ class CupflagWorker:
                     x = box['x'] + 45
                     y = box['y'] + (box['height'] / 2)
 
-                    logger.info(
-                        f"Container coordinates: x={box['x']}, y={box['y']}. Clicking...")
+                    logger.info(f"Checkbox found. Clicking")
                     await self.page.mouse.move(x, y, steps=5)
                     await self.page.wait_for_timeout(200)
                     await self.page.mouse.click(x, y, delay=150)
-
-                    logger.info("Click on coordinates completed!")
-                    await self.page.wait_for_timeout(5000)
                 else:
-                    logger.error(
-                        "Не удалось получить bounding_box родительского контейнера.")
+                    logger.error("Checkbox not found.")
+
+                await self.page.wait_for_timeout(2000)
         except Exception as e:
             logger.error(f"Error clicking checkbox: {e}")
 
-    async def clickCaptureButton(self):
+    async def clickCaptureButton(self) -> None:
         try:
             await self.page.wait_for_selector('#capture-btn', timeout=10000)
             is_disabled = await self.page.locator('#capture-btn').is_disabled()
@@ -201,8 +213,11 @@ async def run_lvl3():
     worker = CupflagWorker()
     await worker.run()
 
+
 if __name__ == "__main__":
     try:
         asyncio.run(run_lvl3())
     except KeyboardInterrupt:
         logger.warning("Скрипт остановлен пользователем")
+    finally:
+        logger.info(f"Total: {len(CAPTURED_FLAGS)} unique flags captured")
