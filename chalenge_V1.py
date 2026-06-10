@@ -1,5 +1,7 @@
 import sys
 import hashlib
+import configparser
+from pathlib import Path
 
 import asyncio
 import httpx
@@ -22,6 +24,23 @@ def generate_credentials() -> tuple[str, str]:
     username = fake.user_name()[3:32]
     password = hashlib.md5(username.lower().encode()).hexdigest()
     return username, password
+
+
+def get_proxy() -> str | None:
+    try:
+        config = configparser.ConfigParser()
+        config_path = Path(__file__).parent / 'proxy.ini'
+        config.read(str(config_path))
+
+        username = config['proxy']['username']
+        password = config['proxy']['password']
+        ip = config['proxy']['ip']
+        port = config['proxy']['port']
+        proxy = f"http://{username}:{password}@{ip}:{port}"
+        return proxy
+    except Exception as e:
+        logger.error(f"Error reading proxy configuration: {e}")
+        return None
 
 
 async def authorization(client: httpx.AsyncClient) -> bool:
@@ -119,9 +138,9 @@ async def catch_cupflags(client: httpx.AsyncClient, worker_id: int) -> None:
 
 async def worker(worker_id: int) -> None:
     logger.info(f"Worker {worker_id} starting")
-    logger.info("Connecting to {BASE_URL}")
+    logger.info(f"Connecting to {BASE_URL}")
 
-    async with httpx.AsyncClient(verify=False) as client:
+    async with httpx.AsyncClient(verify=False, proxy=get_proxy()) as client:
         while True:
             auth_success = False
             for _ in range(3):

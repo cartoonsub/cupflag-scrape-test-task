@@ -18,9 +18,10 @@ logger.add("./logs/V2.log", format="[{time:HH:mm:ss.SSS}] {message}")
 fake = Faker()
 
 BASE_URL = "https://lvl2.cupflag.top"
-BASE_TOKEN = "1.y782XzQ1bGAC5pzCV8ICbJNCo6nK6Mq1PTqZxHHdZNa3avCXyhW54orMfVNR1zyVJe49JR1bKMfCj-fEB2AAncebL-l7WPWz3uxPVVWZlyI-HktOueMyigx6bKTGVQdLc2Do34duw16nrAaWLaIDhLL-YW5Wf6YQ4k1ncDQmzH-mt1BHU1G2YOz_DQA0IiyOFn8PvJcTOZhnrBE_riNLWHwjcgpM5o8yc5AUcYoar3I_j9YbdZgpoWBs_fkiESXDOKyitNcRsN62b0g9mU3SE-9Ub35fQvxEuaaQ2_Rbk0-Zp8y1THeyOcfpJv_3g2Xlt4glJiXAMARB2MhxWysRbN3lm_Sb_1EtVHc5g__A3TVkNZbH39aL_sG2ItZRv819oVxYBOYeZeggEE9XXb5qXgov4kJ2tciCLfRae0K4gFIIsrNoqhkfCfnvWF8VL_iwQaavccWDcPh8OuEkfH9E7VjnYSsxnvIHzRrd7KHVQOVni-DXofBnWRfnhvollYspKdbG3iUU8hIF-Vb8_p6MPFrqTVVGMFfqYoj5MYZjUvOFJgw-GT29rZPxHkT4kzEH1tth4Uk3p7QV2EAe882WALAzrbzlP545pPda-YsGtO1pmhwi6UO3L4DT7WoRjITNvzmJ_0GRt2t3nd08yJVoIu2UIxgmRbxb8zt27FRilX-QcAtRU5gZj9wn35CyGAr0.Xou71KxukLyU8UAvQFujoA.8618abeaf1db537d96c31b2c72d15367e79e24d2d375d9aadec7dc997889dd38"
+# BASE_TOKEN = "1.y782XzQ1bGAC5pzCV8ICbJNCo6nK6Mq1PTqZxHHdZNa3avCXyhW54orMfVNR1zyVJe49JR1bKMfCj-fEB2AAncebL-l7WPWz3uxPVVWZlyI-HktOueMyigx6bKTGVQdLc2Do34duw16nrAaWLaIDhLL-YW5Wf6YQ4k1ncDQmzH-mt1BHU1G2YOz_DQA0IiyOFn8PvJcTOZhnrBE_riNLWHwjcgpM5o8yc5AUcYoar3I_j9YbdZgpoWBs_fkiESXDOKyitNcRsN62b0g9mU3SE-9Ub35fQvxEuaaQ2_Rbk0-Zp8y1THeyOcfpJv_3g2Xlt4glJiXAMARB2MhxWysRbN3lm_Sb_1EtVHc5g__A3TVkNZbH39aL_sG2ItZRv819oVxYBOYeZeggEE9XXb5qXgov4kJ2tciCLfRae0K4gFIIsrNoqhkfCfnvWF8VL_iwQaavccWDcPh8OuEkfH9E7VjnYSsxnvIHzRrd7KHVQOVni-DXofBnWRfnhvollYspKdbG3iUU8hIF-Vb8_p6MPFrqTVVGMFfqYoj5MYZjUvOFJgw-GT29rZPxHkT4kzEH1tth4Uk3p7QV2EAe882WALAzrbzlP545pPda-YsGtO1pmhwi6UO3L4DT7WoRjITNvzmJ_0GRt2t3nd08yJVoIu2UIxgmRbxb8zt27FRilX-QcAtRU5gZj9wn35CyGAr0.Xou71KxukLyU8UAvQFujoA.8618abeaf1db537d96c31b2c72d15367e79e24d2d375d9aadec7dc997889dd38"
+BASE_TOKEN = fake.sha256()
 DEFAULT_RETRY_AFTER_MS = 10000
-
+MAX_CONCURRENT_WORKERS = 5
 
 def generate_credentials() -> tuple[str, str]:
     username = fake.user_name()[3:32]
@@ -161,29 +162,31 @@ async def catch_cupflags(client: httpx.AsyncClient) -> int:
         logger.success(f"✓ Flag captured: {flag}")
         return retry_after_ms
     except Exception as e:
-        logger.error(f"Error capturing flag: {e}")
+        logger.exception(f"Error capturing flag: {e}")
         return retry_after_ms
 
-
-async def run_lvl2() -> None:
-    # background_tasks = set()
+async def worker(worker_id: int) -> None:
+    await asyncio.sleep(worker_id * (DEFAULT_RETRY_AFTER_MS / MAX_CONCURRENT_WORKERS / 1000))
     async with httpx.AsyncClient(
         verify=False,
-        timeout=10.0,
+        timeout=15.0,
         proxy=get_proxy()
-        ) as client:
+    ) as client:
         if not await authorization(client):
             logger.critical("Authorization failed. Stopping.")
             return
 
         while True:
+            # если авторизация слетит, то нужно попытаться авторизоваться снова
             delay = await catch_cupflags(client)
             await asyncio.sleep(delay / 1000)
-        # while True:
-        #     task = asyncio.create_task(catch_cupflags(client))
-        #     background_tasks.add(task)
-        #     task.add_done_callback(background_tasks.discard)
-        #     await asyncio.sleep(RETRY_AFTER_MS / 1000)
+
+async def run_lvl2() -> None:
+    tasks = []
+    for i in range(MAX_CONCURRENT_WORKERS):
+        tasks.append(asyncio.create_task(worker(worker_id=i)))
+
+    await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
     try:

@@ -1,46 +1,66 @@
-# --- Этап 1: Сборка (Build stage) ---
 FROM python:3.14-slim AS builder
 
-# Устанавливаем uv для сверхбыстрой установки зависимостей
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
-
 WORKDIR /build
 
-# Устанавливаем системные зависимости для компиляции
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Копируем только файлы зависимостей для кеширования слоев
 COPY requirements.txt .
-# Устанавливаем зависимости в системное окружение (site-packages)
 RUN uv pip install --no-cache --system -r requirements.txt
 
-
-# --- Этап 2: Финальный образ (Runtime stage) ---
 FROM python:3.14-slim
 
-# Оптимизация Python и настройка таймзоны
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
-    TZ=Europe/Moscow
+    TZ=Europe/Moscow \
+    HOME=/home/appuser \
+    XDG_CACHE_HOME=/home/appuser/.cache
 
-# Устанавливаем tzdata для таймзоны и создаем пользователя (без root)
-RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
-    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd -g 1000 appuser && useradd -r -u 1000 -g appuser appuser
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tzdata \
+    ca-certificates \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libc6 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgbm1 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libpango-1.0-0 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxrandr2 \
+    xdg-utils \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+    && echo $TZ > /etc/timezone \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Копируем только установленные пакеты из первого этапа
 COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
+COPY . .
 
-# Копируем исходный код и меняем владельца на appuser
-COPY --chown=appuser:appuser . .
+RUN groupadd -g 1000 appuser \
+    && useradd -m -d /home/appuser -u 1000 -g appuser appuser \
+    && mkdir -p /home/appuser/.cache \
+    && chown -R appuser:appuser /home/appuser /app \
+    && if [ -d /usr/local/lib/python3.14/site-packages/camoufox ]; then chown -R appuser:appuser /usr/local/lib/python3.14/site-packages/camoufox; fi
 
-# Переключаемся на пользователя
 USER appuser

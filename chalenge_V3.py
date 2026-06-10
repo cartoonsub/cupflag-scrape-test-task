@@ -17,31 +17,25 @@ logger.add("./logs/V3.log", format="[{time:HH:mm:ss.SSS}] {message}")
 
 
 fake = Faker()
+
+
 def generate_credentials() -> tuple[str, str]:
     username = fake.user_name()[3:32]
     password = hashlib.md5(username.lower().encode()).hexdigest()
     return username, password
 
+
 class CupflagWorker:
     def __init__(self):
+        self.proxy = None
+        self.set_proxy()
         self.base_url = "https://lvl3.cupflag.top"
-        config = configparser.ConfigParser()
-        config_path = Path(__file__).parent.parent.parent / \
-            'configs' / 'proxy.ini'
-        config.read(str(config_path))
-
-        self.proxy = {
-            'server': f"http://{config['proxy']['ip']}:{config['proxy']['port']}",
-            'username': config['proxy']['username'],
-            'password': config['proxy']['password']
-        }
 
         constrains = Screen(max_width=1280, max_height=631)
-        profile_path = Path(
-            __file__).parent.parent.parent / 'data' / 'cupflag_profile'
+        profile_path = Path(__file__).parent / 'data' / 'cupflag_profile'
 
         self.camoufox_context = AsyncCamoufox(
-            headless=False,
+            headless=True,
             geoip=True,
             proxy=self.proxy,
             screen=constrains,
@@ -51,13 +45,33 @@ class CupflagWorker:
         self.page = None
         logger.info("Browser initialized")
 
+    def set_proxy(self) -> None:
+        try:
+            config = configparser.ConfigParser()
+            config_path = Path(__file__).parent / 'proxy.ini'
+            config.read(str(config_path))
+
+            username = config['proxy']['username']
+            password = config['proxy']['password']
+            ip = config['proxy']['ip']
+            port = config['proxy']['port']
+
+            self.proxy = {
+                'server': f"http://{ip}:{port}",
+                'username': username,
+                'password': password
+            }
+            logger.info("Proxy configuration loaded successfully.")
+        except Exception as e:
+            logger.error(f"Error reading proxy configuration: {e}")
+            self.proxy = None
 
     async def run(self):
         async with self.camoufox_context as context:
             if context.pages:
-                self.page=context.pages[0]
+                self.page = context.pages[0]
             else:
-                self.page=await context.new_page()
+                self.page =await context.new_page()
 
             await self.page.set_viewport_size({'width': 1280, 'height': 631})
 
@@ -70,9 +84,9 @@ class CupflagWorker:
             logger.info("Authentication successful.")
 
             await self.catch_booking_key()
-            
+
             logger.info("Worker finished.")
-            await self.page.wait_for_timeout(1000000) #todo remove
+            await self.page.wait_for_timeout(1000000)  # todo remove
 
     async def authenticate(self) -> bool:
         if await self.check_authentication():
@@ -84,7 +98,7 @@ class CupflagWorker:
         logger.info("Attempting authentication...")
         await self.page.wait_for_timeout(10000)
         try:
-            url='https://lvl3.cupflag.top/login'
+            url = 'https://lvl3.cupflag.top/login'
             await self.page.goto(url)
             await self.page.wait_for_selector('input[name="login"]', timeout=10000)
 
@@ -108,7 +122,7 @@ class CupflagWorker:
     async def check_authentication(self, check_current_page=False) -> bool:
         logger.info("Checking authentication status...")
         try:
-            url="https://lvl3.cupflag.top/"
+            url = "https://lvl3.cupflag.top/"
             if not check_current_page:
                 await self.page.goto(url, wait_until="domcontentloaded", timeout=10000)
 
@@ -141,14 +155,15 @@ class CupflagWorker:
         try:
             for _ in range(10):
                 await self.page.wait_for_selector('#capture-btn', timeout=10000)
-                is_disabled=await self.page.locator('#capture-btn').is_disabled()
+                is_disabled =await self.page.locator('#capture-btn').is_disabled()
                 if not is_disabled:
-                    logger.info("Capture button is enabled, no need to click checkbox.")
+                    logger.info(
+                        "Capture button is enabled, no need to click checkbox.")
                     return
 
-                logger.info("Capture button is disabled, attempting to click checkbox.")
-                
-                
+                logger.info(
+                    "Capture button is disabled, attempting to click checkbox.")
+
                 container_selector = '#turnstile-container'
                 container = self.page.locator(container_selector)
                 await container.wait_for(state="visible", timeout=10000)
@@ -157,31 +172,33 @@ class CupflagWorker:
                     x = box['x'] + 45
                     y = box['y'] + (box['height'] / 2)
 
-                    logger.info(f"Container coordinates: x={box['x']}, y={box['y']}. Clicking...")
+                    logger.info(
+                        f"Container coordinates: x={box['x']}, y={box['y']}. Clicking...")
                     await self.page.mouse.move(x, y, steps=5)
                     await self.page.wait_for_timeout(200)
                     await self.page.mouse.click(x, y, delay=150)
-                    
+
                     logger.info("Click on coordinates completed!")
                     await self.page.wait_for_timeout(5000)
                 else:
-                    logger.error("Не удалось получить bounding_box родительского контейнера.")
+                    logger.error(
+                        "Не удалось получить bounding_box родительского контейнера.")
         except Exception as e:
             logger.error(f"Error clicking checkbox: {e}")
-
 
 
     async def clickCaptureButton(self):
         try:
             await self.page.wait_for_selector('#capture-btn', timeout=10000)
-            is_disabled=await self.page.locator('#capture-btn').is_disabled()
+            is_disabled =await self.page.locator('#capture-btn').is_disabled()
             if is_disabled:
                 await self.click_checkbox()
                 await self.page.wait_for_timeout(2000)
 
             await self.page.wait_for_selector('#capture-btn', timeout=10000)
             if await self.page.locator('#capture-btn').is_disabled():
-                logger.error("Capture button is still disabled after clicking checkbox.")
+                logger.error(
+                    "Capture button is still disabled after clicking checkbox.")
                 return
 
             await self.page.click('#capture-btn')
@@ -191,7 +208,7 @@ class CupflagWorker:
 
 async def run_lvl3():
     logger.info("V3 Worker starting")
-    worker=CupflagWorker()
+    worker = CupflagWorker()
     await worker.run()
 
 if __name__ == "__main__":
