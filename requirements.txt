@@ -1,0 +1,6 @@
+zstandard~=0.25.0
+Faker~=40.22.0
+loguru~=0.7.3
+camoufox~=0.4.11
+camoufox[geoip]~=0.4.11
+httpx~=0.28.1

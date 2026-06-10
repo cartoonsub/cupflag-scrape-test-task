@@ -1,0 +1,15 @@
+name: cup-challenge
+
+services:
+  main:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    container_name: cup_challenge_backend
+    restart: unless-stopped
+    ports:
+      - "10005:10005"
+    volumes:
+      - ./logs:/app/logs
+    command: ["sleep", "infinity"]
+    

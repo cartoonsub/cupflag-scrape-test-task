@@ -1,0 +1,7 @@
+[proxy]
+ip = 111.111.111.111
+port = 1111
+username = user
+password = password
+
+
